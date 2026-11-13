@@ -1,7 +1,0 @@
-VERSION = 0.0.1
-
-DEPENDENT_MODULES = lib_xassert(>=2.0.0)
-
-MODULE_XCC_FLAGS = $(XCC_FLAGS) -lquadflash
-
-EXCLUDE_FILES += diskio.c make_fat.c
