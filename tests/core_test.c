@@ -71,8 +71,16 @@ int main(int argc, char **argv)
 #if FILESYSTEM_MAX_CLIENTS > 1
     CHECK(fs_open(1, "/test0.bin", FS_OPEN_READ) == FS_RES_BUSY);
 #endif
-    size_t got;
+    size_t got, where;
     unsigned char buffer[1000];
+    /* A seek past the end of a read-only file is rejected without moving. */
+    CHECK(fs_seek(0, 100, 1) == FS_RES_OK);
+    CHECK(fs_seek(0, 8194, 1) == FS_RES_INVALID);
+    CHECK(fs_seek(0, 8094, 0) == FS_RES_INVALID);
+    CHECK(fs_tell(0, &where) == FS_RES_OK && where == 100);
+    CHECK(fs_read(0, buffer, 1, &got) == FS_RES_OK && got == 1 && buffer[0] == pattern(100, 17));
+    CHECK(fs_seek(0, 8193, 1) == FS_RES_OK);
+    CHECK(fs_seek(0, 0, 1) == FS_RES_OK);
     CHECK(fs_read(0, NULL, 1, &got) == FS_RES_INVALID && !got);
     CHECK(fs_read(0, NULL, 0, &got) == FS_RES_OK && !got);
     CHECK(fs_size(0, NULL) == FS_RES_INVALID);
@@ -121,6 +129,9 @@ int main(int argc, char **argv)
             CHECK(got <= sizeof(buffer));
         }
         CHECK(rc == FS_RES_FULL);
+        /* Extending a writable file by seeking reports a full volume. */
+        CHECK(fs_tell(write_handle, &where) == FS_RES_OK);
+        CHECK(fs_seek(write_handle, where + 4096, 1) == FS_RES_FULL);
         CHECK(fs_close(write_handle) == FS_RES_OK);
     }
 #endif

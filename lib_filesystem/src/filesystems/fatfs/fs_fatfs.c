@@ -102,10 +102,16 @@ fs_result_t fs_write(unsigned handle, const void *buffer, size_t count, size_t *
 fs_result_t fs_seek(unsigned handle, size_t offset, int from_start)
 {
     if (!fs_is_open(handle)) return FS_RES_NOT_OPENED;
-    size_t base = from_start ? 0 : f_tell(&files[handle]);
+    FIL *file = &files[handle];
+    size_t base = from_start ? 0 : f_tell(file);
     if (offset > UINT32_MAX - base) return FS_RES_INVALID;
-    FRESULT rc = f_lseek(&files[handle], base + offset);
-    if (!rc && f_tell(&files[handle]) != base + offset) return FS_RES_INVALID;
+    size_t target = base + offset;
+    /* Check before moving: f_lseek clamps a read-only file to its end, which
+     * would change the position of a seek that is then reported as invalid. */
+    if (!(file->flag & FA_WRITE) && target > f_size(file)) return FS_RES_INVALID;
+    FRESULT rc = f_lseek(file, target);
+    /* A writable file is extended; falling short means the volume is full. */
+    if (!rc && f_tell(file) != target) return FS_RES_FULL;
     return result(rc);
 }
 fs_result_t fs_size(unsigned handle, size_t *size)

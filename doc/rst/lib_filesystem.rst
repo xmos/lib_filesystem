@@ -161,7 +161,10 @@ full volume returns ``FS_RES_FULL`` and the number of bytes already written.
 requires write access. Existing open handles are never silently replaced.
 ``seek(offset, from_start)`` accepts an absolute offset when from_start is true,
 or a non-negative forward displacement otherwise. Seek backwards with an
-absolute offset. ``size`` and ``tell`` return zero on an invalid handle.
+absolute offset. ``size`` and ``tell`` return zero on an invalid handle. A seek
+past the end of a file opened read-only returns ``FS_RES_INVALID`` and leaves the
+position unchanged. A seek past the end of a writable file extends it, and
+returns ``FS_RES_FULL`` if the volume fills first.
 
 Unmount returns ``FS_RES_BUSY`` until every file has closed. Mount on an already
 mounted volume is idempotent if the requested format matches. The format enum
@@ -170,7 +173,7 @@ accept FAT12/16/32. The service does not format or enumerate directories.
 
 Petit supports only read-only open/read/seek/size/tell/close. Write or creation
 returns ``FS_RES_UNSUPPORTED``; flush of an open read-only handle is a no-op.
-Petit seeks beyond EOF are rejected. Petit has no unmount call, and
+Petit has no unmount call, and
 ``pf_mount(NULL)`` dereferences NULL; ``petit_wrapper.c`` detaches the internal
 pointer in that TU instead. This workaround and configuration are outside the pristine submodule.
 
