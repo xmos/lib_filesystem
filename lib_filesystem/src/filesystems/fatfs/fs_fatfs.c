@@ -69,7 +69,10 @@ fs_result_t fs_close(unsigned handle)
 {
     if (!fs_is_open(handle)) return FS_RES_NOT_OPENED;
     FRESULT rc = f_close(&files[handle]);
-    if (!rc) fs_files &= ~(1u << handle);
+    /* Release the slot even on error. FatFs invalidates open files when the
+     * media is re-initialised, and a handle that could never be closed would
+     * keep this client, its path and unmount busy until reboot. */
+    fs_files &= ~(1u << handle);
     return result(rc);
 }
 fs_result_t fs_read(unsigned handle, void *buffer, size_t count, size_t *read)

@@ -61,27 +61,18 @@ Known issues
   file total. Unmount is refused until all handles have closed.
 * QSPI is read-only: writable FAT on raw flash needs an erase/rewrite and endurance
   policy. The adapter does not silently rewrite erase sectors with undersized buffers.
-* USB and SD physical drivers are supplied by the application, not this library.
-* The Petit fork includes upstream's published patch. The official patch download
-  is unavailable, so the fork applies an Internet Archive copy; see the fork's
-  README. This library's configuration (CP437, FAT32 enabled) does not compile
-  either patched code path. Unmount is adapted outside upstream source.
-* Only XCommon CMake target builds and native CMake tools/tests are supported.
-  Physical QSPI/USB/SD behaviour is not verified by RAM tests.
 
 ****************
 Development repo
 ****************
 
-* `lib_filesystem <https://github.com/xmos/lib_filesystem>`_
+* `lib_filesystem <https://www.github.com/xmos/lib_filesystem>`_ (https://www.github.com/xmos/lib_filesystem)
 
 **************
 Required tools
 **************
 
-* XMOS XTC Tools 15.3.1 and CMake 3.21+ for target builds.
-* C11 host compiler for the native image tool and basic example's embedded image.
-* Tests only: Python 3 in a virtual environment.
+* XMOS XTC Tools 15.3.1
 
 *********************************
 Required libraries (dependencies)

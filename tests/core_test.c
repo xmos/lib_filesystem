@@ -92,6 +92,15 @@ int main(int argc, char **argv)
 #endif
     CHECK(fs_close(0) == FS_RES_OK);
 #if FILESYSTEM_BACKEND == FILESYSTEM_BACKEND_FATFS
+    /* A close that fails because the media went away must still release the
+     * handle, or the client and unmount stay busy until reboot. */
+    CHECK(fs_open(0, "TEST0.BIN", FS_OPEN_READ) == FS_RES_OK);
+    FILE *present = image.file;
+    image.file = NULL;
+    CHECK(fs_close(0) == FS_RES_NOT_OPENED);
+    image.file = present;
+    CHECK(fs_close(0) == FS_RES_NOT_OPENED);
+    CHECK(!check_file(0, "TEST0.BIN", 8193, 17));
     unsigned write_handle = FS_MAX_CLIENTS - 1;
     CHECK(fs_open(write_handle, "WRITE.BIN", FS_OPEN_READ | FS_OPEN_WRITE | FS_OPEN_CREATE_ALWAYS) == FS_RES_OK);
     for (unsigned i = 0; i < sizeof(buffer); ++i) buffer[i] = pattern(i, 31);
