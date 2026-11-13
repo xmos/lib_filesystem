@@ -1,9 +1,0 @@
-def use_module(bld):
-    depends_on = ['lib_xassert(>=2.0.0)']
-    bld.env.MODULE_XCC_FLAGS = bld.env.XCC_FLAGS + ['-lquadflash']
-    source = bld.path.ant_glob(['src/**/*.c', 'src/**/*.xc'])
-    bld.module(
-        source=source,
-        includes=['api'],
-        depends_on=depends_on,
-        version='0.0.1')

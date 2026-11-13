@@ -1,177 +1,108 @@
-// Copyright (c) 2015-2016, XMOS Ltd, All rights reserved
-#include "ff.h"
-#include <stdio.h>
-#include <string.h>
+// Copyright 2015-2026 XMOS LIMITED.
+// This Software is subject to the terms of the XMOS Public Licence: Version 1.
+#include <errno.h>
+#include <inttypes.h>
 #include <stdlib.h>
+#include <string.h>
+#include "ff.h"
+#include "image_device.h"
+#include "fs_internal.h"
+#if defined(BYTES_PER_SECTOR) && BYTES_PER_SECTOR != 512
+#error The selected FatFs integration uses 512-byte logical sectors
+#endif
+#ifndef SECTOR_COUNT
+#define SECTOR_COUNT 32768
+#endif
 
-FILE *disk_image = NULL;
-const char *disk_image_filename = NULL;
-
-int main(int argc, char const *argv[]) {
-  /* arg1 : path to output binary (will create file)
-   * arg2+: path to file to write into new filesystem (optional)
-   */
-
-  // Sanity check the arguments
-  if (argc < 2) {
-    printf("Must supply name for output file!\n");
-    return 1;
-  }
-
-  /* Set the global filename for the disk image, it will be used by the disk IO
-   * functions.
-   */
-  disk_image_filename = argv[1];
-
-  // Set up the root path for the filesystem in the disk image
-  TCHAR disk_image_root_path[4] = { '0'+DISK_IMAGE, ':', '/', '\0' };
-
-  FATFS fs;
-  unsigned int result = 0;
-
-  /* Call f_mount() to create the output file. If the file already exists it
-   * will be truncated to zero bytes.
-   * The initialisation option is set 0 such that FatFs does not yet attempt to
-   * mount a filesystem from the drive.
-   */
-  printf("Creating disk image...\n");
-  result = f_mount(&fs, disk_image_root_path, 0);
-  if (result) {
-    printf("->f_mount() failed with result code %d\n", result);
-    return 1;
-  }
-
-  /* Create a FAT filesystem in the disk image using the SFD partitioning rule
-   * such that the FAT volume starts from the start of the drive, and does not
-   * create a MBR or partition table.
-   * The allocation unit argument is set to 0 such that the cluster size is set
-   * automatically based on the volume size
-   */
-  printf("Creating FAT filesystem...\n");
-  result = f_mkfs (disk_image_root_path, 1, 0);
-  if (result) {
-    printf("->f_mkfs() failed with result code %d\n", result);
-    return 1;
-  }
-
-  /* Now that the filesystem has been created we can call f_mount() with the
-   * initialisation option is set 1 such that FatFs attempts to mount the FAT
-   * volume from the drive.
-   */
-  printf("Mounting filesystem...\n");
-  result = f_mount(&fs, disk_image_root_path, 1);
-  if (result) {
-    printf("->f_mount() failed with result code %d\n", result);
-    return 1;
-  }
-
-  // Write any files passed as arguments into the new filesystem
-  for (int i = 2; i < argc; i++) {
-    const char *path_on_host = argv[i];
-    FIL file_on_disk_image;
-
-    // Try to extract the filename from a Unix path
-    const char *extracted_filename = strrchr(path_on_host, '/');
-    if (!extracted_filename) { // No Unix path separators found
-      // Try to extract the filename from a Windows path
-      extracted_filename = strrchr(path_on_host, '\\');
+static int write_c_header(FILE *output, FILE *image, uint64_t bytes)
+{
+    uint8_t data[4096];
+    if (fflush(image) || fseeko(image, 0, SEEK_SET)) return 1;
+    if (fprintf(output, "/* Generated FAT image; do not edit. */\nstatic unsigned char image[%" PRIu64 "] = {\n", bytes) < 0)
+        return 1;
+    for (uint64_t position = 0; position < bytes;) {
+        size_t count = bytes - position < sizeof(data) ? (size_t)(bytes - position) : sizeof(data);
+        if (fread(data, 1, count, image) != count) return 1;
+        for (size_t i = 0; i < count; ++i)
+            if (fprintf(output, "%u,%c", (unsigned)data[i], (position + i) % 32 == 31 ? '\n' : ' ') < 0)
+                return 1;
+        position += count;
     }
-    if (!extracted_filename) { // No path separators found
-      // File must be in same directory as this executable
-      extracted_filename = path_on_host;
-    } else { // Found a path separator in the path
-      // Jump forward 1 char to get just the filename
-      extracted_filename = extracted_filename+sizeof(char);
+    return fputs("};\n", output) == EOF;
+}
+
+int main(int argc, char **argv)
+{
+    uint64_t sectors = SECTOR_COUNT;
+    unsigned format = FM_FAT;
+    int force = 0, c_header = 0, arg = 1;
+    while (arg < argc && argv[arg][0] == '-') {
+        if (!strcmp(argv[arg], "--force")) force = 1;
+        else if (!strcmp(argv[arg], "--c-header")) c_header = 1;
+        else if (!strcmp(argv[arg], "--fat32")) format = FM_FAT32;
+        else if (!strcmp(argv[arg], "--sectors") && arg + 1 < argc) {
+            char *end;
+            errno = 0;
+            sectors = strtoull(argv[++arg], &end, 10);
+            if (errno || *end || sectors < 128 || sectors > UINT32_MAX) return 2;
+        } else return 2;
+        ++arg;
     }
-
-    TCHAR path_on_disk_image[strlen(disk_image_root_path) +
-                             strlen(extracted_filename)];
-    strcpy(path_on_disk_image, disk_image_root_path);
-    strcat(path_on_disk_image, extracted_filename);
-
-    printf("Writing %s to filesystem as %s...\n", path_on_host,
-           path_on_disk_image);
-
-    result = f_open(&file_on_disk_image, path_on_disk_image,
-                    FA_CREATE_NEW | FA_WRITE);
-    if (result) {
-      printf("->f_open() failed with the result code %d\n", result);
-      return 1;
+    if (arg == argc) {
+        fprintf(stderr, "Usage: %s [--sectors N] [--fat32] [--force] [--c-header] output [files...]\n", argv[0]);
+        return 2;
     }
-
-    // Open the file on the host
-    FILE* file_on_host = fopen(argv[i], "r");
-    if (!file_on_host) {
-      printf("->Failed to open file %s\n", path_on_host);
-      return 1;
+    if (sectors < 128 || sectors > UINT32_MAX) return 2;
+    const char *name = argv[arg++];
+    fs_image_t image = {0};
+    image.sectors = (uint32_t)sectors;
+    FILE *output = fopen(name, force ? "w+b" : "w+bx");
+    if (!output) { perror(name); return 1; }
+    /* Formatting still uses binary sectors. Header mode keeps those in an
+     * automatically removed temporary file and streams the initializer out. */
+    image.file = c_header ? tmpfile() : output;
+    if (!image.file) { perror("temporary image"); fclose(output); return 1; }
+    if (fseeko(image.file, (off_t)(sectors * 512 - 1), SEEK_SET) || fputc(0, image.file) == EOF || fflush(image.file)) {
+        perror("size image"); fclose(image.file); if (c_header) fclose(output); return 1;
     }
-
-    // Get the size of the file
-    if (fseek(file_on_host, 0, SEEK_END)) {
-      printf("->Failed to seek to end of file %s\n", path_on_host);
-      return 1;
+    fs_block_device_t device = fs_image_device(&image);
+    if (fs_bind(&device)) { fclose(image.file); if (c_header) fclose(output); return 1; }
+    uint8_t work[4096], data[4096];
+    MKFS_PARM options = {format | FM_SFD, 0, 0, 0, 0};
+    FATFS volume;
+    FRESULT result = f_mkfs("0:", &options, work, sizeof(work));
+    if (!result) result = f_mount(&volume, "0:", 1);
+    while (!result && arg < argc) {
+        const char *host = argv[arg++], *base = host;
+        for (const char *p = host; *p; ++p) if (*p == '/' || *p == '\\') base = p + 1;
+        char path[FS_MAX_PATH], canonical[FS_MAX_PATH];
+        if (fs_normalize_path(base, canonical)) { result = FR_INVALID_NAME; break; }
+        int length = snprintf(path, sizeof(path), "0:/%s", canonical);
+        if (length < 0 || length >= (int)sizeof(path)) { result = FR_INVALID_NAME; break; }
+        FILE *source = fopen(host, "rb");
+        if (!source) { perror(host); result = FR_DISK_ERR; break; }
+        FIL destination;
+        result = f_open(&destination, path, FA_CREATE_NEW | FA_WRITE);
+        int opened = !result;
+        while (!result) {
+            size_t count = fread(data, 1, sizeof(data), source);
+            if (ferror(source)) { result = FR_DISK_ERR; break; }
+            if (!count) break;
+            UINT written = 0;
+            result = f_write(&destination, data, count, &written);
+            if (!result && written != count) result = FR_DENIED;
+        }
+        if (opened) {
+            FRESULT closed = f_close(&destination);
+            if (!result) result = closed;
+        }
+        if (fclose(source) && !result) result = FR_DISK_ERR;
     }
-    long bytes_in_file = ftell(file_on_host);
-    if (-1 == bytes_in_file) {
-      printf("->Failed to get size of file %s\n", path_on_host);
-      return 1;
-    }
-
-    // Go back to the start of the file
-    if (fseek(file_on_host, 0, SEEK_SET)) {
-      printf("->Failed to seek back to start of file %s\n", path_on_host);
-      return 1;
-    }
-
-    // Allocate a buffer to hold file contents
-    char *file_contents = calloc(bytes_in_file, sizeof(char));
-    if (!file_contents) {
-      printf("->Failed to allocate buffer for contents of file %s\n",
-             path_on_host);
-      return 1;
-    }
-
-    // Copy the file into memory
-    if (fread(file_contents, sizeof(char), bytes_in_file, file_on_host) !=
-        (size_t)bytes_in_file) {
-      printf("->Failed to read contents into buffer for file %s\n",
-             path_on_host);
-      return 1;
-    }
-
-    // Close the file on the host
-    if (fclose(file_on_host)) {
-      printf("->Failed to close file %s\n", argv[i]);
-      return 1;
-    }
-
-    // Write from memory into the disk image
-    UINT bytes_written = 0;
-    result = f_write(&file_on_disk_image, file_contents, bytes_in_file,
-                     &bytes_written);
-    if (result) {
-      printf("->f_write() failed with the result code %d\n", result);
-      return 1;
-    }
-
-    // Close the file on the disk image
-    result = f_close(&file_on_disk_image);
-    if (result) {
-      printf("->f_close() failed with the result code %d\n", result);
-      return 1;
-    }
-
-    // Free the buffer
-    free(file_contents);
-  }
-
-  // Finally unmount the disk image
-  printf("Unmounting filesystem...\n");
-  result = f_mount(NULL, disk_image_root_path, 0);
-  if (result) {
-    printf("->f_mount() failed with result code %d\n", result);
-    return 1;
-  }
-  printf("Disk image created successfully\n");
-  return 0;
+    f_mount(NULL, "0:", 0);
+    if (!result && c_header && write_c_header(output, image.file, sectors * 512)) result = FR_DISK_ERR;
+    if (fclose(image.file) && !result) result = FR_DISK_ERR;
+    if (c_header && fclose(output) && !result) result = FR_DISK_ERR;
+    if (result) { fprintf(stderr, "Image creation failed: FatFs rc=%u (partial output retained)\n", result); return 1; }
+    printf("Created %s: %" PRIu64 " sectors, 512 bytes/sector%s\n", name, sectors, c_header ? " (C header)" : "");
+    return 0;
 }

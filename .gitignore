@@ -1,22 +1,43 @@
-**/.build*/*
-**/bin/*
-*.o
-*.xe
+# Tmp files & logs
+*.settings
+*.bin
+*.zip
+*.log
 *.vcd
-*.s
+*.swp
+*.*~
+*.xmt
+*.swo
+*.swn
+*~
+*.DS_Store
+*.vscode
+
+# Python
+*.pyc
+**/*.egg-info/
+**/.venv*/
+
+# XMOS temp files
+**/*build*/*
+*/bin/*
+**/flash_bin_node*
+**/fw-*
+**/s2l-*
+**/spanning-xn-*
+**/target-xn*
 *.xi
+*.o
 *.i
 *.a
-**/_build/
-**/run_*.log
-**/pdf/*
-**/html/*
-*.pyc
-**/.settings*
-Installs/*
-test_results.csv
-*.log
-lib_filesystem/disk_image_creators/fat/fat_image_creator
-tests/test_petit_fatfs/petit_fatfs_test
-build
-.lock-waf_*
+*.d
+*.decouple
+*.pca.xml
+**/CMakeFiles/*
+
+# XMOS binaries
+*.xe
+
+# Built documentation
+doc/_build/pdf/*.pdf
+**/doc/pdf/*.pdf
