@@ -7,15 +7,21 @@ static unsafe client interface fs_block_media_if medium;
 static unsafe client interface fs_storage_media_if legacy;
 static unsigned use_legacy;
 fs_result_t fs_bind_service(void);
+/* Bind outside xassert(): it expands to nothing when assertions are disabled,
+ * which would leave the core unbound. A second owner is always fatal. */
+static void claim_core(void)
+{
+    if (fs_bind_service() != FS_RES_OK) fail("Run only one filesystem owner task");
+}
 void fs_connect_media(client interface fs_storage_media_if media)
 {
-    xassert(fs_bind_service() == FS_RES_OK && msg("Run only one filesystem owner task"));
+    claim_core();
     use_legacy = 1;
     unsafe { legacy = media; }
 }
 void fs_connect_block_media(client interface fs_block_media_if media)
 {
-    xassert(fs_bind_service() == FS_RES_OK && msg("Run only one filesystem owner task"));
+    claim_core();
     use_legacy = 0;
     unsafe { medium = media; }
 }
